@@ -11,9 +11,11 @@ const usernameRegex = `[\w.-]*`
 func createLineParser() parsec.Parser {
 	infoParser := createInfoParser()
 	messageParser := createMessageParser()
-	meMessageParser := createMeParser()
+	meMessageParser := createActionParser()
+	ackParser := createAckParser()
+	systemMessageParser := createSystemMessageParser()
 
-	return parsec.OrdChoice(selectFirstNode, infoParser, meMessageParser, messageParser)
+	return parsec.OrdChoice(selectFirstNode, infoParser, meMessageParser, messageParser, ackParser, systemMessageParser)
 }
 
 func createInfoParser() parsec.Parser {
@@ -107,7 +109,7 @@ func createMessageParser() parsec.Parser {
 	return parsec.OrdChoice(selectFirstNode, pmParser, msgParser)
 }
 
-func createMeParser() parsec.Parser {
+func createActionParser() parsec.Parser {
 	usernameParser := parsec.Token(usernameRegex, "USERNAME")
 	return parsec.And(func(nodes []parsec.ParsecNode) parsec.ParsecNode {
 		username := nodes[1].(*parsec.Terminal).GetValue()
@@ -117,4 +119,46 @@ func createMeParser() parsec.Parser {
 			Message: message,
 		}
 	}, parsec.Atom("**", "PREFIX"), usernameParser, createMessageSuffixParser())
+}
+
+func createAckParser() parsec.Parser {
+	return parsec.OrdChoice(selectFirstNode, createPrivateAckMsgParser(), createPublicAckMsgParser())
+}
+
+func createPrivateAckMsgParser() parsec.Parser {
+	userNameTok := parsec.Token(usernameRegex, "USERNAME")
+
+	return parsec.And(func(nodes []parsec.ParsecNode) parsec.ParsecNode {
+		username := nodes[1].(*parsec.Terminal).GetValue()
+		return AckMsg{
+			Username: username,
+			Message:  "",
+			Type:     AckMsgPrivate,
+		}
+	}, parsec.Atom("-> [Sent PM to", "_PM_ACK_PREFIX"), userNameTok, parsec.Token("]", "_USERNAME_ENDS"))
+
+}
+func createPublicAckMsgParser() parsec.Parser {
+	userNameTok := parsec.Token(usernameRegex, "USERNAME")
+	msgSuffixParser := createMessageSuffixParser()
+
+	return parsec.And(func(nodes []parsec.ParsecNode) parsec.ParsecNode {
+		username := nodes[1].(*parsec.Terminal).GetValue()
+		message := nodes[3].(string)
+		return AckMsg{
+			Username: username,
+			Message:  message,
+			Type:     AckMsgPublic,
+		}
+	}, parsec.Atom("[", "_USERNAME_BEGINS"), userNameTok, parsec.Token("]", "_USERNAME_ENDS"), msgSuffixParser)
+}
+
+func createSystemMessageParser() parsec.Parser {
+	messageParser := createMessageSuffixParser()
+	return parsec.And(func(nodes []parsec.ParsecNode) parsec.ParsecNode {
+		message := nodes[1].(string)
+		return SystemMsg{
+			Message: message,
+		}
+	}, parsec.Atom("->", "SYSTEM_MESSAGE_PREFIX"), messageParser)
 }

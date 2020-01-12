@@ -27,6 +27,28 @@ type JoinMsg struct {
 	Status   UserConnStatus
 }
 
+// AckMsg represents the message sent back by ssh-chat
+type AckMsg struct {
+	Username string
+	Message  string
+	Type     AckMsgType
+}
+
+// AckMsgType represents what kind of message was acknowledged
+type AckMsgType int
+
+const (
+	// AckMsgPublic means public message was acknowledged
+	AckMsgPublic AckMsgType = iota
+	// AckMsgPrivate means private message was acknowledged
+	AckMsgPrivate
+)
+
+// SystemMsg represents the system messages ssh-chat sends periodically
+type SystemMsg struct {
+	Message string
+}
+
 // UsernameChangeMsg represents message published by server about users changing their names
 type UsernameChangeMsg struct {
 	FromUsername string
