@@ -43,20 +43,49 @@ func run() error {
 		return err
 	}
 
-	client, err := sshclient.CreateClient(opts.ServerAddr, opts.BotName)
-	if err != nil {
-		return errors.Wrapf(err, "connect failed")
-	}
-	defer client.Close()
-
 	for {
-		cline, err := client.ScanLine()
+		client, err := sshclient.CreateClient(opts.ServerAddr, opts.BotName)
+		if err != nil {
+			return errors.Wrapf(err, "connect failed")
+		}
+		defer client.Close()
+
+		readSomething := false
+
+		err = handle(opts, func() (string, error) {
+			line, err := client.ScanLine()
+			if err == nil {
+				readSomething = true
+			}
+			return line, err
+		})
+
+		if err == nil {
+			lg.Info("handle returned without error")
+			continue
+		}
+		if !readSomething {
+			return errors.Wrapf(err, "failed without reading from server")
+		}
+		lg.Warn("message handler failed, retrying:", err)
+		time.Sleep(10 * time.Second)
+	}
+
+}
+
+func handle(opts Options, readLine func() (string, error)) error {
+	for {
+		cline, err := readLine()
 		if err != nil {
 			return errors.Wrapf(err, "read failed")
 		}
 		line := strings.TrimSpace(cline)
 
 		lg.WithField("line", line).Debug("Scanned line")
+
+		if len(line) == 0 {
+			continue
+		}
 
 		if strings.HasPrefix(line, "*") {
 			lg.Debug("Ignoring system message")
@@ -65,7 +94,9 @@ func run() error {
 
 		parts := strings.SplitN(line, ":", 2)
 		if len(parts) != 2 {
-			lg.Warn("Message does not have a sender, ignoring")
+			lg.WithField("line", line).
+				Warn("Message does not have a sender, ignoring")
+			continue
 		}
 		from := strings.TrimSpace(parts[0])
 		msg := strings.TrimSpace(parts[1])
