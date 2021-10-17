@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	config "github.com/gookit/config/v2"
+	jcfg "github.com/gookit/config/v2/json"
 	flags "github.com/jessevdk/go-flags"
 	"github.com/pkg/errors"
 	lg "github.com/sirupsen/logrus"
@@ -21,30 +23,41 @@ func main() {
 	}
 }
 
-type Options struct {
-	ServerAddr       string   `short:"s" long:"server-addr" description:"ssh-chat server address to connect to" required:"true"`
-	BotName          string   `short:"n" long:"name" description:"name of the bot listener bot" required:"true"`
-	Keywords         []string `short:"k" long:"keywords" description:"keywords to monitor" required:"true"`
-	PushoverToken    string   `short:"p" long:"pushover-token" description:"token used to send notifications to pushover" required:"true"`
-	PushoverGroupKey string   `short:"g" long:"pushover-group" description:"pushover group to notify" required:"true"`
+type MentionConfig struct {
+	Name             string   `mapstructure:"name"`
+	Keywords         []string `mapstructure:"keywords"`
+	PushoverToken    string   `mapstructure:"pushover-token"`
+	PushoverGroupKey string   `mapstructure:"pushover-group"`
+}
 
+type Config struct {
+	ServerAddr  string          `mapstructure:"server-addr"`
+	BotName     string          `mapstructure:"name"`
+	MentionCfgs []MentionConfig `mapstructure:"mentions"`
+}
+
+type CliOptions struct {
+	Cfg             string `short:"c" long:"config" description:"location of the config file" default:"config.json"`
 	Verbose         bool   `short:"v" long:"verbose" description:"print verbose messages"`
 	LogTimeLocation string `short:"z" long:"log-tz" description:"timezone for log messages" default:"America/Vancouver"`
 }
 
 func run() error {
-	var opts Options
+	var opts CliOptions
 	_, err := flags.Parse(&opts)
 	if err != nil {
-		return nil
+		return err
 	}
 	err = setupLogger(opts)
 	if err != nil {
 		return err
 	}
-
+	cfg, err := loadConfig(opts.Cfg)
+	if err != nil {
+		return err
+	}
 	for {
-		client, err := sshclient.CreateClient(opts.ServerAddr, opts.BotName)
+		client, err := sshclient.CreateClient(cfg.ServerAddr, cfg.BotName)
 		if err != nil {
 			return errors.Wrapf(err, "connect failed")
 		}
@@ -52,7 +65,7 @@ func run() error {
 
 		readSomething := false
 
-		err = handle(opts, func() (string, error) {
+		err = handle(cfg.MentionCfgs, func() (string, error) {
 			line, err := client.ScanLine()
 			if err == nil {
 				readSomething = true
@@ -70,10 +83,24 @@ func run() error {
 		lg.Warn("message handler failed, retrying:", err)
 		time.Sleep(10 * time.Second)
 	}
-
 }
 
-func handle(opts Options, readLine func() (string, error)) error {
+func loadConfig(file string) (*Config, error) {
+	config.AddDriver(jcfg.Driver)
+	err := config.LoadFiles(file)
+	if err != nil {
+		return nil, fmt.Errorf("unable to load config file: %w", err)
+	}
+	var cfg Config
+	err = config.BindStruct("", &cfg)
+	if err != nil {
+		return nil, fmt.Errorf("unable to bind config struct: %w", err)
+	}
+
+	return &cfg, nil
+}
+
+func handle(mentions []MentionConfig, readLine func() (string, error)) error {
 	for {
 		cline, err := readLine()
 		if err != nil {
@@ -101,14 +128,18 @@ func handle(opts Options, readLine func() (string, error)) error {
 		from := strings.TrimSpace(parts[0])
 		msg := strings.TrimSpace(parts[1])
 
-		found := checkKeyword(msg, opts.Keywords)
+		for _, mcfg := range mentions {
 
-		if !found {
-			continue
+			if checkKeyword(msg, mcfg.Keywords) {
+				lg.WithFields(lg.Fields{"from": from, "message": msg, "cfg": mcfg.Name}).
+					Info("Notifying for message")
+				sendPushoverNotification(from, msg, pushoverCfg{
+					Token:    mcfg.PushoverToken,
+					GroupKey: mcfg.PushoverGroupKey,
+				})
+			}
 		}
-		lg.WithFields(lg.Fields{"from": from, "message": msg}).
-			Info("Notifying for message from")
-		sendPushoverNotification(opts, from, msg)
+
 	}
 }
 
@@ -126,10 +157,15 @@ func checkKeyword(str string, keywords []string) bool {
 
 const pushoverMessageURL = "https://api.pushover.net/1/messages.json"
 
-func sendPushoverNotification(opts Options, from, message string) {
+type pushoverCfg struct {
+	Token    string
+	GroupKey string
+}
+
+func sendPushoverNotification(from, message string, po pushoverCfg) {
 	params := url.Values{}
-	params.Add("token", opts.PushoverToken)
-	params.Add("user", opts.PushoverGroupKey)
+	params.Add("token", po.Token)
+	params.Add("user", po.GroupKey)
 	params.Add("title", "SSH Chat Mention")
 	params.Add("message", fmt.Sprintf("%s said: %s", from, message))
 
@@ -139,12 +175,12 @@ func sendPushoverNotification(opts Options, from, message string) {
 		return
 	}
 	if resp.StatusCode != http.StatusOK {
-		lg.WithField("status", resp.Request.Response.Status).
+		lg.WithField("status", resp.StatusCode).
 			Warn("Unexpected status code from pushover", resp)
 		return
 	}
 }
-func setupLogger(opts Options) error {
+func setupLogger(opts CliOptions) error {
 	if opts.Verbose {
 		lg.SetLevel(lg.DebugLevel)
 	} else {

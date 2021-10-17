@@ -1,0 +1,22 @@
+{
+    "server-addr": "localhost:2022",
+    "name": "otear-bot",
+    "mentions": [
+        {
+            "name": "voldy",
+            "keywords": [
+                "voldyman"
+            ],
+            "pushover-token": "",
+            "pushover-group-key": ""
+        },
+        {
+            "name": "uno-legend",
+            "keywords": [
+                "onelegend"
+            ],
+            "pushover-token": "",
+            "pushover-group-key": ""
+        }
+    ]
+}
