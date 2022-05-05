@@ -59,9 +59,16 @@ func run() error {
 	for {
 		client, err := sshclient.CreateClient(cfg.ServerAddr, cfg.BotName)
 		if err != nil {
-			return errors.Wrapf(err, "connect failed")
+			lg.Warn("connect failed: ", err)
+			time.Sleep(1 * time.Minute)
+			continue
 		}
-		defer client.Close()
+		defer func() {
+			if client != nil {
+				client.Close()
+			}
+		}()
+		lg.Info("connection established")
 
 		readSomething := false
 
@@ -80,8 +87,13 @@ func run() error {
 		if !readSomething {
 			return errors.Wrapf(err, "failed without reading from server")
 		}
-		lg.Warn("message handler failed, retrying:", err)
-		time.Sleep(10 * time.Second)
+		lg.Warn("message handler failed, retrying: ", err)
+		err = client.Close()
+		if err != nil {
+			lg.Warn("unable close client: ", err)
+		}
+		client = nil
+		time.Sleep(30 * time.Second)
 	}
 }
 
@@ -89,12 +101,12 @@ func loadConfig(file string) (*Config, error) {
 	config.AddDriver(jcfg.Driver)
 	err := config.LoadFiles(file)
 	if err != nil {
-		return nil, fmt.Errorf("unable to load config file: %w", err)
+		return nil, errors.Wrap(err, "unable to load config file")
 	}
 	var cfg Config
 	err = config.BindStruct("", &cfg)
 	if err != nil {
-		return nil, fmt.Errorf("unable to bind config struct: %w", err)
+		return nil, errors.Wrap(err, "unable to bind config struct")
 	}
 
 	return &cfg, nil
@@ -171,12 +183,12 @@ func sendPushoverNotification(from, message string, po pushoverCfg) {
 
 	resp, err := http.PostForm(pushoverMessageURL, params)
 	if err != nil {
-		lg.Warn("Unable to publish to pushover", err)
+		lg.Warn("Unable to publish to pushover: ", err)
 		return
 	}
 	if resp.StatusCode != http.StatusOK {
 		lg.WithField("status", resp.StatusCode).
-			Warn("Unexpected status code from pushover", resp)
+			Warn("Unexpected status code from pushover: ", resp)
 		return
 	}
 }
