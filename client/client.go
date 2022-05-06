@@ -96,7 +96,7 @@ func (c *Client) ScanLine() (string, error) {
 	if c.err != nil {
 		return "", c.err
 	}
-	c.conn.SetReadDeadline(time.Now().Add(30 * time.Minute))
+	// c.conn.SetReadDeadline(time.Now().Add(30 * time.Minute))
 
 	continueReading := c.scanner.Scan()
 	if c.scanner.Err() != nil {
